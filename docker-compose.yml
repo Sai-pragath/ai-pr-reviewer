@@ -1,0 +1,121 @@
+version: '3.8'
+
+services:
+  # Database Service (PostgreSQL)
+  db:
+    image: postgres:15-alpine
+    container_name: reviewer_db
+    restart: always
+    environment:
+      POSTGRES_DB: aipr_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - reviewer-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aipr_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Spring Boot Backend Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: reviewer_backend
+    restart: always
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=aipr_db
+      - DB_USER=postgres
+      - DB_PASS=postgrespassword
+      - LLM_PROVIDER=stub # default sandbox mode, change to 'claude' or 'gemini' on EC2
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - reviewer-network
+
+  # React Frontend Dashboard SPA
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: reviewer_frontend
+    restart: always
+    networks:
+      - reviewer-network
+
+  # Nginx Gateway Reverse Proxy (Single entry point on Port 80)
+  nginx:
+    image: nginx:alpine
+    container_name: reviewer_gateway
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - reviewer-network
+
+  # Container Metrics Collector (cAdvisor)
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.2
+    container_name: reviewer_cadvisor
+    restart: always
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - reviewer-network
+
+  # Metrics Storage (Prometheus)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: reviewer_prometheus
+    restart: always
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - backend
+      - cadvisor
+    networks:
+      - reviewer-network
+
+  # Metrics Dashboard (Grafana)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: reviewer_grafana
+    restart: always
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=adminpassword
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(http_port)s/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - reviewer-network
+
+volumes:
+  pgdata:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  reviewer-network:
+    driver: bridge

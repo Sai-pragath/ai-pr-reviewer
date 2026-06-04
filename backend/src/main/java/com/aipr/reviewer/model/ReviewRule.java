@@ -1,0 +1,33 @@
+package com.aipr.reviewer.model;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+@Entity
+@Table(name = "review_rules")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class ReviewRule {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false)
+    private String name;
+
+    @Column(nullable = false)
+    private String category; // e.g. "security", "codeSmell", "optimization", "bugRisk"
+
+    @Column(columnDefinition = "TEXT")
+    private String description;
+
+    @Column(nullable = false)
+    private String severity; // e.g. "CRITICAL", "WARNING", "INFO"
+
+    @Builder.Default
+    private boolean enabled = true;
+}
