@@ -72,6 +72,7 @@ services:
     image: gcr.io/cadvisor/cadvisor:v0.47.2
     container_name: reviewer_cadvisor
     restart: always
+    command: ["-url_base_prefix=/cadvisor"]
     volumes:
       - /:/rootfs:ro
       - /var/run:/var/run:ro
@@ -86,6 +87,7 @@ services:
     image: prom/prometheus:latest
     container_name: reviewer_prometheus
     restart: always
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--web.external-url=/prometheus/"]
     volumes:
       - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
