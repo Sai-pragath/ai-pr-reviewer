@@ -157,4 +157,3 @@ Follow these steps to deploy the application on a single EC2 server instance:
   - Default Username: `admin`
   - Default Password: `adminpassword` (Configured inside `docker-compose.yml` - change on production setup).
   - *Data Source configuration*: Connect Prometheus data source via target `http://prometheus:9090`.
-
