@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { GitBranch, ShieldCheck, Key, HelpCircle, Link2, Copy, Check, Eye, EyeOff } from 'lucide-react';
 
 interface Repository {
@@ -11,40 +11,22 @@ interface Repository {
   targetBranches: string[];
 }
 
+interface BackendRepoConfig {
+  id: number;
+  fullName: string;
+  webhookSecret: string;
+  githubToken: string;
+  targetBranches: string[];
+  enabled: boolean;
+}
+
 export const RepositoriesView: React.FC = () => {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [showToken, setShowToken] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
+  const [loading, setLoading] = useState(false);
   
-  const [repos, setRepos] = useState<Repository[]>([
-    {
-      id: 1,
-      owner: 'acme-org',
-      name: 'spring-petclinic',
-      webhookUrl: 'http://3.124.9.45:8080/api/v1/webhooks/github',
-      webhookStatus: 'ACTIVE',
-      lastPing: '2 mins ago',
-      targetBranches: ['main', 'develop']
-    },
-    {
-      id: 2,
-      owner: 'acme-org',
-      name: 'react-dashboard',
-      webhookUrl: 'http://3.124.9.45:8080/api/v1/webhooks/github',
-      webhookStatus: 'ACTIVE',
-      lastPing: '1 hour ago',
-      targetBranches: ['main']
-    },
-    {
-      id: 3,
-      owner: 'personal-project',
-      name: 'payment-gateway',
-      webhookUrl: 'http://3.124.9.45:8080/api/v1/webhooks/github',
-      webhookStatus: 'PENDING',
-      lastPing: 'Never',
-      targetBranches: ['master']
-    }
-  ]);
+  const [repos, setRepos] = useState<Repository[]>([]);
 
   const [newOwner, setNewOwner] = useState('');
   const [newName, setNewName] = useState('');
@@ -52,26 +34,107 @@ export const RepositoriesView: React.FC = () => {
   const [githubPat, setGithubPat] = useState('');
   const [targetBranchesInput, setTargetBranchesInput] = useState('main, develop');
 
-  const handleConnectRepo = (e: React.FormEvent) => {
+  // Dynamically resolve webhook endpoint relative to the active browser address bar
+  const defaultWebhookUrl = `${window.location.protocol}//${window.location.host}/api/v1/webhooks/github`;
+
+  const fetchRepositories = async () => {
+    try {
+      const response = await fetch('/api/v1/repositories');
+      if (response.ok) {
+        const data: BackendRepoConfig[] = await response.json();
+        const mappedRepos: Repository[] = data.map(r => {
+          const parts = r.fullName.split('/');
+          return {
+            id: r.id,
+            owner: parts[0] || 'unknown',
+            name: parts[1] || 'unknown',
+            webhookUrl: defaultWebhookUrl,
+            webhookStatus: r.enabled ? 'ACTIVE' : 'FAILED',
+            lastPing: 'Active',
+            targetBranches: r.targetBranches || ['main']
+          };
+        });
+        setRepos(mappedRepos);
+      }
+    } catch (e) {
+      console.warn('Backend offline, loaded repositories in demo mode.', e);
+      // Fallback fallback if backend database is starting/unreachable
+      setRepos([
+        {
+          id: 1,
+          owner: 'acme-org',
+          name: 'spring-petclinic',
+          webhookUrl: defaultWebhookUrl,
+          webhookStatus: 'ACTIVE',
+          lastPing: '2 mins ago',
+          targetBranches: ['main', 'develop']
+        },
+        {
+          id: 2,
+          owner: 'acme-org',
+          name: 'react-dashboard',
+          webhookUrl: defaultWebhookUrl,
+          webhookStatus: 'ACTIVE',
+          lastPing: '1 hour ago',
+          targetBranches: ['main']
+        }
+      ]);
+    }
+  };
+
+  useEffect(() => {
+    fetchRepositories();
+  }, []);
+
+  const handleConnectRepo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newOwner || !newName) return;
 
-    const newRepo: Repository = {
-      id: Date.now(),
-      owner: newOwner,
-      name: newName,
-      webhookUrl: 'http://3.124.9.45:8080/api/v1/webhooks/github',
-      webhookStatus: 'PENDING',
-      lastPing: 'Never',
-      targetBranches: targetBranchesInput.split(',').map(b => b.trim()).filter(Boolean)
+    setLoading(true);
+    
+    const payload = {
+      fullName: `${newOwner.trim()}/${newName.trim()}`,
+      webhookSecret: webhookSecret,
+      githubToken: githubPat,
+      targetBranches: targetBranchesInput.split(',').map(b => b.trim()).filter(Boolean),
+      enabled: true
     };
 
-    setRepos([...repos, newRepo]);
-    setNewOwner('');
-    setNewName('');
-    
-    setSuccessMsg(`Repository ${newOwner}/${newName} connected successfully. Set up the webhook in your GitHub repository settings.`);
-    setTimeout(() => setSuccessMsg(''), 6000);
+    try {
+      const response = await fetch('/api/v1/repositories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (response.ok) {
+        setSuccessMsg(`Repository ${payload.fullName} connected successfully. Set up the webhook in your GitHub repository settings.`);
+        setNewOwner('');
+        setNewName('');
+        setWebhookSecret('');
+        setGithubPat('');
+        fetchRepositories(); // Refresh table from PostgreSQL
+      } else {
+        setSuccessMsg('Failed to connect repository. Please check server logs.');
+      }
+    } catch (err) {
+      console.error(err);
+      setSuccessMsg('Backend connection failed. Repository added locally in offline sandbox mode.');
+      // Offline fallback state update
+      const offlineRepo: Repository = {
+        id: Date.now(),
+        owner: newOwner,
+        name: newName,
+        webhookUrl: defaultWebhookUrl,
+        webhookStatus: 'PENDING',
+        lastPing: 'Never',
+        targetBranches: payload.targetBranches
+      };
+      setRepos(prev => [...prev, offlineRepo]);
+    } finally {
+      setLoading(false);
+      setTimeout(() => setSuccessMsg(''), 6000);
+    }
   };
 
   const handleCopy = (text: string, idx: number) => {
@@ -159,6 +222,7 @@ export const RepositoriesView: React.FC = () => {
                 value={githubPat}
                 onChange={(e) => setGithubPat(e.target.value)}
                 placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                required
               />
               <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '6px' }}>
                 Requires `repo` scope to read diffs and post inline pull request review comments.
@@ -173,11 +237,12 @@ export const RepositoriesView: React.FC = () => {
                 value={webhookSecret}
                 onChange={(e) => setWebhookSecret(e.target.value)}
                 placeholder="Enter HMAC secret passphrase"
+                required
               />
             </div>
 
-            <button type="submit" className="btn btn-primary" style={{ width: '100%' }}>
-              Connect Repository
+            <button type="submit" className="btn btn-primary" style={{ width: '100%' }} disabled={loading}>
+              {loading ? 'Connecting...' : 'Connect Repository'}
             </button>
           </form>
         </div>
@@ -206,11 +271,11 @@ export const RepositoriesView: React.FC = () => {
               fontSize: '0.8rem',
               color: 'white'
             }}>
-              <span>http://[your-ec2-ip]:8080/api/v1/webhooks/github</span>
+              <span style={{ wordBreak: 'break-all', paddingRight: '8px' }}>{defaultWebhookUrl}</span>
               <button
                 className="btn-icon"
-                style={{ width: '28px', height: '28px', borderRadius: '4px' }}
-                onClick={() => handleCopy('http://3.124.9.45:8080/api/v1/webhooks/github', 99)}
+                style={{ width: '28px', height: '28px', borderRadius: '4px', flexShrink: 0 }}
+                onClick={() => handleCopy(defaultWebhookUrl, 99)}
               >
                 {copiedIndex === 99 ? <Check size={14} style={{ color: 'var(--accent-emerald)' }} /> : <Copy size={14} />}
               </button>
@@ -261,12 +326,12 @@ export const RepositoriesView: React.FC = () => {
                   </td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
                         {repo.webhookUrl}
                       </span>
                       <button
                         className="btn-icon"
-                        style={{ width: '24px', height: '24px', borderRadius: '4px' }}
+                        style={{ width: '24px', height: '24px', borderRadius: '4px', flexShrink: 0 }}
                         onClick={() => handleCopy(repo.webhookUrl, idx)}
                       >
                         {copiedIndex === idx ? <Check size={12} style={{ color: 'var(--accent-emerald)' }} /> : <Copy size={12} />}
