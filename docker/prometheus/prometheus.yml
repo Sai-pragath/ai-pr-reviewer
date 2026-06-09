@@ -11,5 +11,6 @@ scrape_configs:
 
   # Scrape cAdvisor container performance metrics
   - job_name: 'cadvisor'
+    metrics_path: '/cadvisor/metrics'
     static_configs:
       - targets: ['cadvisor:8080']

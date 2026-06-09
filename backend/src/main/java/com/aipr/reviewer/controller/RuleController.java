@@ -16,7 +16,7 @@ public class RuleController {
     @Autowired
     private ReviewRuleRepository ruleRepository;
 
-    @Value("${llm.default-system-prompt}")
+    @Value("${llm.default-system-prompt:You are a senior software engineering staff reviewer. Analyze the pull request diff code chunk. Perform checks for security flaws, buffer issues, SQL injection, logical errors, resource leaks, and performance optimization. Output comment responses in standard JSON format containing file, line, and comments.}")
     private String defaultSystemPrompt;
 
     @GetMapping
